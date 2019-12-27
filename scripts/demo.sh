@@ -1,4 +1,4 @@
-#!/bin/sh -e
+#!/bin/bash -e
 
 if [ ! -e text8 ]; then
 	echo "Download text8 corpus"
