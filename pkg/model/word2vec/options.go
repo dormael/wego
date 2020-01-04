@@ -28,7 +28,7 @@ func invalidModelTypeError(typ ModelType) error {
 	return errors.Errorf("invalid model: %s not in %s|%s", typ, Cbow, SkipGram)
 }
 func invalidOptimizerTypeError(typ OptimizerType) error {
-	return errors.Errorf("invalid optimizer: %s not in %s|%ss", typ, NegativeSampling, HierarchicalSoftmax)
+	return errors.Errorf("invalid optimizer: %s not in %s|%s", typ, NegativeSampling, HierarchicalSoftmax)
 }
 
 type ModelType string
@@ -124,13 +124,13 @@ func ToLower() ModelOption {
 	})
 }
 
-func WithMinCount(v int) ModelOption {
+// model options
+func WithBatchSize(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
-		opts.CorpusOptions.MinCount = v
+		opts.ModelOptions.BatchSize = v
 	})
 }
 
-// model options
 func WithDimension(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.ModelOptions.Dim = v
@@ -146,6 +146,12 @@ func WithInitLearningRate(v float64) ModelOption {
 func WithIteration(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.ModelOptions.Iter = v
+	})
+}
+
+func WithMinCount(v int) ModelOption {
+	return ModelOption(func(opts *Options) {
+		opts.ModelOptions.MinCount = v
 	})
 }
 

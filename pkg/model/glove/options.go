@@ -15,25 +15,40 @@
 package glove
 
 import (
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/ynqa/wego/pkg/corpus"
+	"github.com/ynqa/wego/pkg/corpus/pairwise"
 	"github.com/ynqa/wego/pkg/model"
 )
+
+func invalidSolverTypeError(typ SolverType) error {
+	return errors.Errorf("invalid solver: %s not in %s|%s", typ, Stochastic, AdaGrad)
+}
 
 type SolverType string
 
 const (
-	Stochastic SolverType = "sgd"
-	AdaGrad    SolverType = "adagrad"
+	Stochastic        SolverType = "sgd"
+	AdaGrad           SolverType = "adagrad"
+	defaultSolverType            = Stochastic
 )
 
 func (t *SolverType) String() string {
+	if *t == SolverType("") {
+		*t = defaultSolverType
+	}
 	return string(*t)
 }
 
-func (t *SolverType) Set(string) error {
-	return nil
+func (t *SolverType) Set(name string) error {
+	typ := SolverType(name)
+	if typ == Stochastic || typ == AdaGrad {
+		*t = typ
+		return nil
+	}
+	return invalidSolverTypeError(typ)
 }
 
 func (t *SolverType) Type() string {
@@ -41,23 +56,26 @@ func (t *SolverType) Type() string {
 }
 
 const (
-	defaultAlpha      = 0.75
-	defaultSolverType = Stochastic
-	defaultXmax       = 100
+	defaultAlpha              = 0.75
+	defaultSubsampleThreshold = 1.0e-3
+	defaultXmax               = 100
 )
 
 type Options struct {
-	CorpusOptions corpus.Options
-	ModelOptions  model.Options
+	CorpusOptions   corpus.Options
+	PairwiseOptions pairwise.Options
+	ModelOptions    model.Options
 
-	Alpha      float64
-	SolverType SolverType
-	Xmax       int
+	Alpha              float64
+	SolverType         SolverType
+	SubsampleThreshold float64
+	Xmax               int
 }
 
 func LoadForCmd(cmd *cobra.Command, opts *Options) {
 	cmd.Flags().Float64Var(&opts.Alpha, "alpha", defaultAlpha, "exponent of weighting function")
 	cmd.Flags().Var(&opts.SolverType, "solver", "solver for GloVe objective. One of: sgd|adagrad")
+	cmd.Flags().Float64Var(&opts.SubsampleThreshold, "threshold", defaultSubsampleThreshold, "threshold for subsampling")
 	cmd.Flags().IntVar(&opts.Xmax, "xmax", defaultXmax, "specifying cutoff in weighting function")
 }
 
@@ -70,13 +88,20 @@ func ToLower() ModelOption {
 	})
 }
 
-func WithMinCount(v int) ModelOption {
+// pairwise options
+func WithCountType(typ pairwise.CountType) ModelOption {
 	return ModelOption(func(opts *Options) {
-		opts.CorpusOptions.MinCount = v
+		opts.PairwiseOptions.CountType = typ
 	})
 }
 
 // model options
+func WithBatchSize(v int) ModelOption {
+	return ModelOption(func(opts *Options) {
+		opts.ModelOptions.BatchSize = v
+	})
+}
+
 func WithDimension(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.ModelOptions.Dim = v
@@ -92,6 +117,12 @@ func WithInitLearningRate(v float64) ModelOption {
 func WithIteration(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.ModelOptions.Iter = v
+	})
+}
+
+func WithMinCount(v int) ModelOption {
+	return ModelOption(func(opts *Options) {
+		opts.ModelOptions.MinCount = v
 	})
 }
 
@@ -126,29 +157,14 @@ func WithSolver(typ SolverType) ModelOption {
 	})
 }
 
+func WithSubsampleThreshold(v float64) ModelOption {
+	return ModelOption(func(opts *Options) {
+		opts.SubsampleThreshold = v
+	})
+}
+
 func WithXmax(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.Xmax = v
 	})
-}
-
-func New(opts ...ModelOption) (model.Model, error) {
-	options := Options{
-		CorpusOptions: corpus.DefaultOption(),
-		ModelOptions:  model.DefaultOptions(),
-
-		Alpha:      defaultAlpha,
-		SolverType: defaultSolverType,
-		Xmax:       defaultXmax,
-	}
-
-	for _, fn := range opts {
-		fn(&options)
-	}
-
-	return NewForOptions(options)
-}
-
-func NewForOptions(opts Options) (model.Model, error) {
-	return nil, nil
 }

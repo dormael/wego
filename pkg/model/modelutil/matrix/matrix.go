@@ -34,11 +34,3 @@ func (m *Matrix) Slice(id int) []float64 {
 	start := m.startIndex(id)
 	return m.array[start : start+m.col]
 }
-
-func (m *Matrix) Zeros(id int) []float64 {
-	v := m.Slice(id)
-	for i := 0; i < m.col; i++ {
-		v[i] = 0
-	}
-	return v
-}

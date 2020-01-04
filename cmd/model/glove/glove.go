@@ -16,6 +16,7 @@ package glove
 
 import (
 	"os"
+	"path/filepath"
 	"runtime/pprof"
 
 	"github.com/pkg/errors"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/ynqa/wego/cmd/model/cmdutil"
 	"github.com/ynqa/wego/pkg/corpus"
+	"github.com/ynqa/wego/pkg/corpus/pairwise"
 	"github.com/ynqa/wego/pkg/model"
 	"github.com/ynqa/wego/pkg/model/glove"
 	"github.com/ynqa/wego/pkg/model/modelutil/save"
@@ -51,6 +53,7 @@ func New() *cobra.Command {
 	cmdutil.AddSaveVectorTypeFlags(cmd, &saveVectorType)
 
 	corpus.LoadOptionsForCmd(cmd, &opts.CorpusOptions)
+	pairwise.LoadForCmd(cmd, &opts.PairwiseOptions)
 	model.LoadForCmd(cmd, &opts.ModelOptions)
 	glove.LoadForCmd(cmd, &opts)
 	return cmd
@@ -76,6 +79,13 @@ func execute(opts glove.Options) error {
 	} else if !fileExists(inputFile) {
 		return errors.Errorf("Not such a file %s", inputFile)
 	}
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0777); err != nil {
+		return err
+	}
+	output, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
 	input, err := os.Open(inputFile)
 	if err != nil {
 		return err
@@ -88,5 +98,5 @@ func execute(opts glove.Options) error {
 	if err := mod.Train(input); err != nil {
 		return err
 	}
-	return mod.Save(nil, saveVectorType)
+	return mod.Save(output, saveVectorType)
 }

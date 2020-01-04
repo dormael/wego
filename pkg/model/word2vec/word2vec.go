@@ -6,27 +6,27 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"math/rand"
 	"sync"
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/pkg/errors"
 	"github.com/ynqa/wego/pkg/clock"
 	"github.com/ynqa/wego/pkg/corpus"
 	"github.com/ynqa/wego/pkg/model"
 	"github.com/ynqa/wego/pkg/model/modelutil/matrix"
 	"github.com/ynqa/wego/pkg/model/modelutil/save"
+	"github.com/ynqa/wego/pkg/model/subsample"
 	"github.com/ynqa/wego/pkg/verbose"
 )
 
 type word2vec struct {
 	opts Options
 
-	corpus     *corpus.Corpus
+	corpus *corpus.Corpus
+
 	param      *matrix.Matrix
-	subSamples []float64
+	subsampler *subsample.Subsampler
 	currentlr  float64
 	mod        mod
 	optimizer  optimizer
@@ -36,7 +36,7 @@ type word2vec struct {
 
 func New(opts ...ModelOption) (model.Model, error) {
 	options := Options{
-		CorpusOptions: corpus.DefaultOption(),
+		CorpusOptions: corpus.DefaultOptions(),
 		ModelOptions:  model.DefaultOptions(),
 
 		MaxDepth:           defaultMaxDepth,
@@ -55,11 +55,12 @@ func New(opts ...ModelOption) (model.Model, error) {
 }
 
 func NewForOptions(opts Options) (model.Model, error) {
+	// TODO: validate Options
 	v := verbose.New(opts.ModelOptions.Verbose)
 	return &word2vec{
 		opts: opts,
 
-		corpus: corpus.New(v),
+		corpus: corpus.New(opts.CorpusOptions, v),
 
 		currentlr: opts.ModelOptions.Initlr,
 
@@ -68,24 +69,23 @@ func NewForOptions(opts Options) (model.Model, error) {
 }
 
 func (w *word2vec) preTrain(r io.Reader) error {
-	if err := w.corpus.Read(r, w.opts.CorpusOptions); err != nil {
-		return errors.Wrap(err, "failed to read corpus")
+	if err := w.corpus.Read(r); err != nil {
+		return err
 	}
 
-	dic := w.corpus.Dictionary()
-	dim := w.opts.ModelOptions.Dim
-	w.param = matrix.New(dic.Len(), dim, func(vec []float64) {
-		for i := 0; i < dim; i++ {
-			vec[i] = (rand.Float64() - 0.5) / float64(dim)
-		}
-	})
+	dic, dim := w.corpus.Dictionary(), w.opts.ModelOptions.Dim
 
-	w.subSamples = make([]float64, dic.Len())
-	for i := 0; i < dic.Len(); i++ {
-		z := float64(dic.IDFreq(i)) / float64(w.corpus.Len())
-		w.subSamples[i] = (math.Sqrt(z/w.opts.SubsampleThreshold) + 1.0) *
-			w.opts.SubsampleThreshold / z
-	}
+	w.param = matrix.New(
+		dic.Len(),
+		dim,
+		func(vec []float64) {
+			for i := 0; i < dim; i++ {
+				vec[i] = (rand.Float64() - 0.5) / float64(dim)
+			}
+		},
+	)
+
+	w.subsampler = subsample.New(dic, w.opts.SubsampleThreshold)
 
 	switch w.opts.ModelType {
 	case SkipGram:
@@ -119,14 +119,15 @@ func (w *word2vec) Train(r io.Reader) error {
 	}
 
 	for i := 1; i <= w.opts.ModelOptions.Iter; i++ {
-		trained := make(chan struct{})
-		go w.observeLearningRate(trained)
+		trained, clk := make(chan struct{}), clock.New()
+		go w.observe(trained, clk)
 
 		docCh := make(chan []int)
+		go w.corpus.BatchDocument(docCh, w.opts.ModelOptions.BatchSize)
+
 		sem := semaphore.NewWeighted(int64(w.opts.ModelOptions.ThreadSize))
 		wg := &sync.WaitGroup{}
 
-		go w.corpus.Load(docCh, w.opts.CorpusOptions)
 		for d := range docCh {
 			wg.Add(1)
 			go w.trainPerThread(d, trained, sem, wg)
@@ -153,24 +154,22 @@ func (w *word2vec) trainPerThread(
 		return err
 	}
 
+	dic := w.corpus.Dictionary()
 	for pos, id := range doc {
-		bernoulliTrial := rand.Float64()
-		p := w.subSamples[id]
-		if p < bernoulliTrial {
-			continue
+		if w.subsampler.Trial(id) && dic.IDFreq(id) > w.opts.ModelOptions.MinCount {
+			w.mod.trainOne(doc, pos, w.currentlr, w.param, w.optimizer)
 		}
-		w.mod.trainOne(doc, pos, w.currentlr, w.param, w.optimizer)
 		trained <- struct{}{}
 	}
 
 	return nil
 }
 
-func (w *word2vec) observeLearningRate(trained chan struct{}) {
-	cnt, clk := 0, clock.New()
+func (w *word2vec) observe(trained chan struct{}, clk *clock.Clock) {
+	var cnt int
 	for range trained {
 		cnt++
-		if cnt%10000 == 0 {
+		if cnt%w.opts.ModelOptions.BatchSize == 0 {
 			lower := w.opts.ModelOptions.Initlr * w.opts.Theta
 			if w.currentlr < lower {
 				w.currentlr = lower
@@ -221,5 +220,8 @@ func (w *word2vec) Save(f io.Writer, typ save.VectorType) error {
 		})
 	}
 	writer.WriteString(fmt.Sprintf("%v", buf.String()))
+	w.verbose.Do(func() {
+		fmt.Printf("save %d words %v\r\n", dic.Len(), clk.AllElapsed())
+	})
 	return nil
 }

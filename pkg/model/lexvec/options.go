@@ -15,27 +15,43 @@
 package lexvec
 
 import (
+	"fmt"
+
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
 	"github.com/ynqa/wego/pkg/corpus"
 	"github.com/ynqa/wego/pkg/model"
 )
 
+func invalidRelationTypeError(typ RelationType) error {
+	return errors.Errorf("invalid relation type: %s not in %s|%s|%s|%s", typ, PPMI, PMI, Collocation, LogCollocation)
+}
+
 type RelationType string
 
 const (
-	PPMI           RelationType = "ppmi"
-	PMI            RelationType = "pmi"
-	Collocation    RelationType = "co"
-	LogCollocation RelationType = "logco"
+	PPMI                RelationType = "ppmi"
+	PMI                 RelationType = "pmi"
+	Collocation         RelationType = "co"
+	LogCollocation      RelationType = "logco"
+	defaultRelationType              = PPMI
 )
 
 func (t *RelationType) String() string {
+	if *t == RelationType("") {
+		*t = defaultRelationType
+	}
 	return string(*t)
 }
 
-func (t *RelationType) Set(string) error {
-	return nil
+func (t *RelationType) Set(name string) error {
+	typ := RelationType(name)
+	if typ == PPMI || typ == PMI || typ == Collocation || typ == LogCollocation {
+		*t = typ
+		return nil
+	}
+	return invalidRelationTypeError(typ)
 }
 
 func (t *RelationType) Type() string {
@@ -44,7 +60,6 @@ func (t *RelationType) Type() string {
 
 const (
 	defaultNegativeSampleSize = 5
-	defaultRelationType       = PPMI
 	defaultSmooth             = 0.75
 	defaultSubsampleThreshold = 1.0e-3
 	defaultTheta              = 1.0e-4
@@ -63,7 +78,7 @@ type Options struct {
 
 func LoadForCmd(cmd *cobra.Command, opts *Options) {
 	cmd.Flags().IntVar(&opts.NegativeSampleSize, "sample", defaultNegativeSampleSize, "negative sample size")
-	cmd.Flags().Var(&opts.RelationType, "rel", "relation type for counting co-occurrence. One of ppmi|pmi|co|logco")
+	cmd.Flags().Var(&opts.RelationType, "rel", fmt.Sprintf("relation type for co-occurrence words. One of %s|%s|%s|%s", PPMI, PMI, Collocation, LogCollocation))
 	cmd.Flags().Float64Var(&opts.Smooth, "smooth", defaultSmooth, "smoothing value for co-occurence value")
 	cmd.Flags().Float64Var(&opts.SubsampleThreshold, "threshold", defaultSubsampleThreshold, "threshold for subsampling")
 	cmd.Flags().Float64Var(&opts.Theta, "theta", defaultTheta, "lower limit of learning rate (lr >= initlr * theta)")
@@ -78,13 +93,13 @@ func ToLower() ModelOption {
 	})
 }
 
-func WithMinCount(v int) ModelOption {
+// model options
+func WithBatchSize(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
-		opts.CorpusOptions.MinCount = v
+		opts.ModelOptions.BatchSize = v
 	})
 }
 
-// model options
 func WithDimension(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.ModelOptions.Dim = v
@@ -100,6 +115,12 @@ func WithInitLearningRate(v float64) ModelOption {
 func WithIteration(v int) ModelOption {
 	return ModelOption(func(opts *Options) {
 		opts.ModelOptions.Iter = v
+	})
+}
+
+func WithMinCount(v int) ModelOption {
+	return ModelOption(func(opts *Options) {
+		opts.ModelOptions.MinCount = v
 	})
 }
 
@@ -154,7 +175,7 @@ func WithTheta(v float64) ModelOption {
 
 func New(opts ...ModelOption) (model.Model, error) {
 	options := Options{
-		CorpusOptions: corpus.DefaultOption(),
+		CorpusOptions: corpus.DefaultOptions(),
 		ModelOptions:  model.DefaultOptions(),
 
 		NegativeSampleSize: defaultNegativeSampleSize,

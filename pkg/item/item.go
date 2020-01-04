@@ -58,7 +58,7 @@ func Parse(r io.Reader, op ItemOp) error {
 		}
 	}
 	if err := s.Err(); err != nil && err != io.EOF {
-		return errors.Wrapf(err, "Failed to scan %v", r)
+		return errors.Wrapf(err, "failed to scan")
 	}
 	return nil
 }
